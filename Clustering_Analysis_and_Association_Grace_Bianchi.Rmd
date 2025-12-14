@@ -1,0 +1,288 @@
+---
+title: "Clustering Analysis and Association Case Study - House Prices"
+author: "Grace Bianchi"
+date: "2025-12-11"
+output: pdf_document
+---
+
+## Load Libraries and Read Data
+
+```{r, warning = F}
+#Loading libraries
+library(factoextra)
+library(FactoMineR)
+library(dendextend)
+library(hopkins)
+library(cluster)
+library(arules)
+library(arulesViz)
+```
+
+```{r, warning = F}
+#Reading the data
+house_price_data <- read.csv("houseprice.csv")
+house_price_data <- as.matrix(house_price_data)
+head(house_price_data)
+```
+
+In this dataset there are 1047 records for 1047 houses. The variables are: Living.Area, Bathrooms, Bedrooms, Lot.Size, Age, Fireplace, Price.
+
+# Cluster Analysis
+
+### Standardize Data
+
+```{r, warning = F}
+#Standardize data
+house_price_data.st <- scale(house_price_data)
+head(house_price_data.st)
+```
+
+### K-Means Algorithm
+
+```{r, warning = F}
+#k-means algorithm
+fviz_nbclust(house_price_data.st, kmeans, method = "wss", nstart=20) + geom_vline(xintercept = 3, linetype = 2)
+```
+
+The total within-cluster sum of squares drops sharply from k=1 to k=2 and again to k=3. After k=3, the curve begins to flatten and each additional cluster yields only a modest reduction in WSS. This "elbow" around k=3 suggests that three clusters captures most of the structure in the data. One could also argue for k=2 or k=4 as good solutions, but k=3 was chosen as the ideal number of clusters.
+
+```{r, warning = F}
+house_price_data.km <- kmeans(house_price_data.st, 3, nstart =20)
+house_price_data.km
+
+aggregate(house_price_data, by=list(cluster=house_price_data.km$cluster), mean)
+```
+
+```{r, warning = F}
+fviz_cluster(house_price_data.km, data = house_price_data.st, repel = T, ellipse.type = "euclid", geom="point")
+```
+
+Cluster Interpretations:
+
+Cluster 1: Houses in Cluster 1 feature medium sized living rooms, an avergae
+number of bedrooms and bathrooms, as well as a moderate price. They are mid-range
+homes with balanced features and prices
+
+Cluster 2: Houses in Cluster 2 are smaller and older. They feature the least
+amount of bathrooms, fewer fireplaces, and a lower price. They are budget/aging 
+homes that have low-market value or are entry-level homes.
+
+Cluster 3: Houses in Cluster 3 are the largest, featuring more bedrooms, bathrooms,
+and fireplaces. Additionally, they are newer and have the highest price. They are
+high-value and modern homes.
+
+
+### Hierarchical Methods
+
+```{r, warning = F}
+#distance matrix
+house_price_data.dist.eucl <- dist(house_price_data.st, method = "euclidean")
+fviz_dist(house_price_data.dist.eucl, show_labels = FALSE)
+
+house_price_data.hc = hclust(d = house_price_data.dist.eucl, method = "ward.D2")
+
+plot(house_price_data.hc,cex=0.5)
+rect.hclust(house_price_data.hc,3)
+```
+
+### Cluster Tree Verification
+
+```{r, warning = F}
+# ward.D2 linkage
+res.coph = cophenetic(house_price_data.hc)
+cor(house_price_data.dist.eucl,res.coph)
+
+# average linkage
+hc_avg = hclust(d = house_price_data.dist.eucl, method = "average")
+cor(house_price_data.dist.eucl,cophenetic(hc_avg))
+
+# complete linkage
+hc_comp = hclust(d = house_price_data.dist.eucl, method = "complete")
+cor(house_price_data.dist.eucl,cophenetic(hc_comp))
+
+# single linkage
+hc_sing = hclust(d = house_price_data.dist.eucl, method = "single")
+cor(house_price_data.dist.eucl,cophenetic(hc_sing))
+```
+
+Among the hierarchial linkage methods, average linkage achieved the highest cophenetic correlation (0.760), indicating the closest preservation of the original Euclidean distances. Complete linkage (0.634) and single linkage (0.681) performed moderately, while Ward.D2 showed a lower value (0.523).
+
+However, despite the lower cophenetic correlation, Ward.D2 was retained as the primary hierarchical method. Ward.D2 is well suited for standardized numerical data, produces compact and well-separated clusters, and closely matches the structure obtained from k-means (which also minimizes within-cluster variance). This method provided the most interpretable and stable partition of the data, consistent with common practice in clustering analysis.
+
+### Compare Dendrogams
+
+```{r, warning = F}
+house_price_data.hc1 = hclust(d = house_price_data.dist.eucl, method = "ward.D2")
+house_price_data.hc2 = hclust(d = house_price_data.dist.eucl, method = "average")
+
+dend1 = as.dendrogram(house_price_data.hc1)
+dend2 = as.dendrogram(house_price_data.hc2)
+
+tanglegram(dend1,dend2)
+```
+
+```{r, warning = F}
+entanglement_value = entanglement(dend1, dend2)
+entanglement_value
+```
+
+```{r, warning=F}
+dend_list <- dendlist(dend1, dend2, as.dendrogram(hc_comp), as.dendrogram(hc_sing))
+cor.dendlist(dend_list, method="cophenetic")
+```
+
+The tanglegram comparing Ward.D2 and average linkage shows an entanglement of 0.21, a relatively low value indicating that the two dendrograms share a broadly similar structure with limited crossing between matched branches. The cophenetic correlation matrix reinforces this: complete and average linkage agree most strongly (~0.65), while Ward.D2 shows moderate similarity with complete linkage (~0.59) and weaker similarity with average linkage (~0.45), and single linkage is the least consistent with the others due to chaining. Although Ward.D2 is not the method that best preserves pairwise distances, it produces more compact and interpreatble clusters and remains reasonably aligned with alternative linkage methods. Together, the low entanglement and moderate correlations suggest that the underlying cluster structure is stable, and they support using Ward.D2 as the preferred hierarchial approach.
+
+### PCA Visualization of Variables
+
+```{r, warning = F}
+fviz_pca_ind(prcomp(house_price_data.st),
+             habillage = house_price_data.km$cluster,
+             repel = TRUE)
+
+fviz_pca_var(
+  prcomp(house_price_data.st),
+  col.var = "contrib",
+  repel = TRUE    
+)
+```
+
+The PCA results provide a clear structural interpretation of the housing dataset and help explain the seperation of the three clusters. Dimension 1 (49.1% of total variance) represents a strong size-value axis: Living Area, Lot Size, Price, Bedrooms, and Bathrooms all load negatively on this component, meaning houses located toward the right of the plot are larger, more amenity-rich, and more expensive. Dimension 2 (15.6% of total variance) contrasts Age with features such as Fireplaces and Bathrooms, separating older homes (low on Dim2) from newer or updated homes (higher on Dim2). When projecting the k-means clusters onto the individual PCA space, the three groups align naturally with these gradients: Cluster 1 (blue) falls between the two extremes, indicating mid-sized, moderately priced homes; Cluster 2 (red) occupies the left side of Dim1, corresponding to smaller, older, and less expensive homes; and Cluster 3 (green) appears on the right side of Dim1 and slightly higher on Dim2, representing large, never, and high-priced homes;. Overall, the PCA plot confirm that the clusters identified by k-means correspond to meaningful and interpretable structural difference in house characteristics.
+
+### Hopkins Statistics
+
+```{r, warning = F}
+hopkins_stat = hopkins(house_price_data.st, m=100)
+hopkins_stat
+```
+
+The Hopkins statistic calculated using the hopkins library gives a value of 0.999 which is incredibly close to 1, indicating clustered data.
+
+### Alternative Algorithms
+
+```{r, warning = F}
+# Partitioning Around Medoids (PAM)
+fviz_nbclust(house_price_data.st, pam, method = "silhouette",nstart = 200)
+
+pam.res = pam(house_price_data.st,2)
+head(pam.res)
+
+fviz_cluster(pam.res,
+             ellipse.type = "t", 
+             repel = TRUE)
+
+```
+
+The silhouette analysis for PAM indicates that k=2 provides the best overall partition, with the highest average silhouette width. This suggests that the dataset has a strong underlying two-group structure, mainly separating larger, higher-value homes from smaller, less expensive homes, which aligns with the dominant gradient seen in the PCA results. The medoids from the two clusters reflect this contrast: one medoid represents smaller homes with smaller living area, fewer bathrooms, and lower prices, while the other corresponds to larger homes with higher values. Compared with k-means, which identified three more granular clusters, PAM produces a broader, more conservative segmentation, grouping the mid-market cluster with either the higher-end or lower-end cluster depending on proximity in the data space. The cluster visualization confirms this two-block pattern, supporting the overall conclusion that the primary structure in the data is driven by a size-value dimension, with k-means offering a more detailed refinement of this underlying split.
+
+# Association Rules
+
+### Read the Data
+```{r}
+house_price_data <- read.csv("houseprice.csv")
+```
+
+### Discretize Numeric Variables Using Quantiles
+```{r, warning= F}
+#Living Area
+house_price_data$LivingAreaLevel = cut(house_price_data$Living.Area,
+                       breaks = quantile(house_price_data$Living.Area, probs = c(0, 0.33, 0.66, 1), na.rm = TRUE),
+                       labels = c("Small", "Average", "Large"),
+                       include.lowest = TRUE)
+
+
+#Bathrooms
+house_price_data$BathroomsLevel = cut(house_price_data$Bathrooms,
+                       breaks = c(0,1,2,3),
+                       labels = c("One", "Two", "Three+"),
+                       include.lowest = TRUE)
+
+#Bedrooms
+house_price_data$BedroomsLevel = cut(house_price_data$Bedrooms,
+                       breaks = c(0,1,2,3),
+                       labels = c("One", "Two", "Three+"),
+                       include.lowest = TRUE)
+
+#Lot Size
+house_price_data$LotSizeLevel = cut(house_price_data$Lot.Size,
+                       breaks = quantile(house_price_data$Lot.Size, probs = c(0, 0.33, 0.66, 1), na.rm = TRUE),
+                       labels = c("Small", "Average", "Large"),
+                       include.lowest = TRUE)
+
+#Age
+house_price_data$AgeLevel = cut(house_price_data$Age,
+                       breaks = quantile(house_price_data$Age, probs = c(0, 0.33, 0.66, 1), na.rm = TRUE),
+                       labels = c("Recent", "Mid", "Old"),
+                       include.lowest = TRUE)
+
+#Fireplace
+house_price_data$FireplaceLevel = cut(house_price_data$Fireplace,
+                       breaks = c(-1, 0, 1, 2),
+                       labels = c("None", "One", "Two+"),
+                       include.lowest = TRUE)
+
+#Price
+house_price_data$PriceLevel = cut(house_price_data$Price,
+                       breaks = quantile(house_price_data$Price, probs = c(0, 0.33, 0.66, 1), na.rm = TRUE),
+                       labels = c("Less Expensive", "Average", "Expensive"),
+                       include.lowest = TRUE)
+```
+
+### Keep only final variables and convert all variables to factors
+```{r, warning = F}
+vars = c("LivingAreaLevel", "BathroomsLevel", "BedroomsLevel", "LotSizeLevel", "AgeLevel", "FireplaceLevel", "PriceLevel")
+
+data_final = house_price_data[,vars]
+
+data_final[] = lapply(data_final, as.factor)
+
+head(data_final)
+```
+
+### Transform to Transactions and Generate Rules
+```{r, warning = F}
+#Convert to transaction format
+trans = as(data_final, "transactions")
+summary(trans)
+
+#Apply apriori algorithm
+rules = apriori(trans, parameter = list(supp = 0.01, conf = 0.3))
+summary(rules)
+```
+
+The discretized dataset produces 1,047 transactions and 21 categorical items, with most homes contributing 6–7 attributes. This density is appropriate for association rule mining and ensures that meaningful co-occurrence patterns can emerge. Apriori generated 6,749 rules under the 1% support and 30% confidence thresholds, with a median lift of about 1.52, indicating that many rules reflect non-random relationships between structural features of homes.
+
+```{r, warning = F}
+#Sort by lift and inspect top rules
+top_rules = sort(rules, by = "lift", decreasing = T)
+inspect(head(top_rules, 10))
+```
+
+The highest-lift rules predominantly predict two-bedroom homes, revealing a strong structural pattern in the dataset. Homes that are mid-aged, have one bathroom, and sit on small lots are associated with a 94% likelihood of having exactly two bedrooms (lift ~ 5.6). This indicates that smaller, older homes follow a very consistent layout pattern, making the number of bedrooms one of the most predictable attributes in the dataset.
+
+```{r, warning = F}
+#Price rules
+price_rules = subset(rules, rhs%in% "PriceLevel=Expensive")
+inspect(head(sort(price_rules, by = "lift"), 5))
+```
+
+Rules predicting expensive homes consistently involve large living areas, three or more bathrooms, multiple bedrooms, and large lots. The highest-confidence rules (confidence = 1.00, lift ~ 2.94) reveal that houses with this combination of size and amenities are always in the expensive tier. This reinforces the idea that house price is strongly driven by total size and number of features.
+
+### Visualizations
+```{r, warning = F}
+#Scatterplot of rules
+plot(rules, method = "scatterplot", measure = c("support", "confidence"), shading = "lift")
+
+#Grouped matrix of top 200 rules
+top200 <- head(sort(rules, by = "lift"), 200)
+plot(top200, method = "grouped")
+```
+
+Interpretation: The rule scatterplot shows that while most rules have low support, many exhibit high confidence and lift, indicating reliable patterns even among less frequent combinations. The grouped matrix highlights two major structural archetypes: rules involving small, older homes with fewer bathrooms cluster around "less expensive" outcomes, whereas rules involving large, amenity-rich homes cluster around the "expensive" outcome. These patterns align directly with the three clusters identified earlier.
+
+
+# Conclusion and Limitations
+
+This project used multiple clustering techniques and association rule mining to uncover structure within the housing dataset and identify the features most strongly associated with home pricing. Across k-means, hierarchical clustering, and PAM, a consistent segmentation emerged: properties naturally group into clusters representing smaller and older homes, mid-sized mid-aged homes, and larger, newer, more expensive homes. PCA reinforced this structure by showing that the first principal component—driven primarily by lot size, age, and total living area—cleanly separates smaller/older properties from larger/newer ones. Association rules added further insight by highlighting stable co-occurrence patterns: combinations such as small living area, small lot size, and one bathroom frequently predict homes with only two bedrooms, while large lots, three or more bathrooms, and multiple bedrooms almost always imply an expensive price category. Together, these methods provide a coherent and interpretable view of the underlying patterns shaping variation in the housing market.
+
+Despite these strengths, several limitations affect the generalizability of the findings. Clustering outcomes depend on the chosen distance metric, the decision to standardize the data, and the selected number of clusters; alternative preprocessing choices could shift the cluster boundaries, particularly within the mid-market region where homes are more heterogeneous. K-means also imposes spherical cluster assumptions that may not perfectly reflect real housing variability. On the association-rule side, continuous variables were discretized into categorical bins, meaning rule patterns depend partly on the quantile thresholds used. A minimum support of 1% ensures reliability but may exclude rarer, potentially meaningful relationships. Future analyses could incorporate additional variables such as neighborhood characteristics or renovation quality, experiment with model-based or density-based clustering, or apply supervised learning methods to directly predict price tiers. These extensions would deepen the interpretability of the clusters and strengthen the predictive power of the association insights.
